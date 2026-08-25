@@ -7,31 +7,10 @@ import dotenv from "dotenv";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { Server as SocketIOServer } from "socket.io";
-import { ensureUsersTable } from "./backend/config/db.js";
+import pool, { ensureUsersTable } from "./backend/config/db.js";
 import authRoutes from "./backend/routes/authRoutes.js";
 import businessRoutes from "./backend/routes/businessRoutes.js";
-import mysql from 'mysql2/promise';
-import dotenv from 'dotenv';
-
-dotenv.config();
-
-const pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: Number(process.env.DB_PORT) || 4000,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  ssl: {
-    minVersion: 'TLSv1.2',
-    rejectUnauthorized: true
-  }
-});
-
-export default pool;
-import pool from "./backend/config/db.js";
+import communityRoutes from "./backend/routes/communityRoutes.js";
 import { setSocketServer } from "./backend/services/realtime.js";
 
 dotenv.config();
@@ -53,7 +32,7 @@ if (process.env.GEMINI_API_KEY) {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
   const httpServer = createServer(app);
   const io = new SocketIOServer(httpServer, {
     cors: { origin: process.env.CLIENT_ORIGIN || "http://localhost:3000" },
@@ -79,7 +58,7 @@ async function startServer() {
     console.warn("Database initialization skipped; continuing in demo mode.", error?.message || error);
   }
 
-  // API routes first
+  // API routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
@@ -126,10 +105,8 @@ Your tone is warm, dreamy, elegant, and playful (Pinterest-scrapbook style) with
 
 Context about current user session chat: This is a chat directly with Marshmallow on the browser overlay. Keep the response compact, extremely welcoming, and matching the Jaipur cozy vibe. Limit responses to 2-3 brief lines or tidy bullet points.`;
 
-      // Construct a conversational history for Gemini
       const contents = [];
       
-      // We can pass the history if available
       if (Array.isArray(history)) {
         for (const msg of history) {
           contents.push({
@@ -158,8 +135,7 @@ Context about current user session chat: This is a chat directly with Marshmallo
         botReply = response.text;
       }
 
-      // Persist chat messages to database
-      const sessionId = req.headers['x-session-id'] as string || `session-${Date.now()}`;
+      const sessionId = (req.headers['x-session-id'] as string) || `session-${Date.now()}`;
       try {
         await pool.query(
           'INSERT INTO chat_messages (session_id, sender, message) VALUES (?, ?, ?)',
@@ -180,7 +156,7 @@ Context about current user session chat: This is a chat directly with Marshmallo
     }
   });
 
-  // Vite middleware Setup
+  // Vite middleware setup
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -198,7 +174,7 @@ Context about current user session chat: This is a chat directly with Marshmallo
     });
   }
 
-  httpServer.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });
 }

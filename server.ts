@@ -15,7 +15,6 @@ import { setSocketServer } from "./backend/services/realtime.js";
 
 dotenv.config();
 
-// Initialize Gemini SDK with telemetry User-Agent when an API key is available.
 let ai: GoogleGenAI | null = null;
 if (process.env.GEMINI_API_KEY) {
   ai = new GoogleGenAI({
@@ -27,7 +26,7 @@ if (process.env.GEMINI_API_KEY) {
     }
   });
 } else {
-  console.warn("GEMINI_API_KEY not set; using a built-in fallback response for the chat endpoint.");
+  console.warn("GEMINI_API_KEY not set; using fallback response mode.");
 }
 
 async function startServer() {
@@ -35,17 +34,16 @@ async function startServer() {
   const PORT = process.env.PORT || 3000;
   const httpServer = createServer(app);
 
-  // Configure Socket.IO with CORS for both development and deployed production domain
   const io = new SocketIOServer(httpServer, {
     cors: { 
-      origin: process.env.CLIENT_ORIGIN || "*",
+      origin: "*",
       methods: ["GET", "POST"]
     },
   });
 
   setSocketServer(io);
 
-  // Configure Security Headers with explicit Asset and Image policies
+  // Security policies updated for static images
   app.use(
     helmet({
       contentSecurityPolicy: false,
@@ -62,21 +60,21 @@ async function startServer() {
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-  // Serve static uploads folder (ensures images are visible in production)
+  // Static directories: serves /uploads and production bundled /assets
+  const distPath = path.join(process.cwd(), "dist");
   const uploadsPath = path.join(process.cwd(), "uploads");
-  app.use("/uploads", express.static(uploadsPath, {
-    maxAge: "7d",
-    immutable: true,
-  }));
 
-  // Ensure initial database schema setup runs safely on start
+  app.use("/uploads", express.static(uploadsPath));
+  app.use("/assets", express.static(path.join(distPath, "assets")));
+  app.use(express.static(distPath));
+
   try {
     await ensureUsersTable();
   } catch (error: any) {
     console.warn("Database initialization skipped; continuing in demo mode.", error?.message || error);
   }
 
-  // Core API Routes
+  // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
@@ -85,7 +83,7 @@ async function startServer() {
   app.use("/api", businessRoutes);
   app.use("/api/community", communityRoutes);
 
-  // Real-time WebSocket Listeners for Scrapbook & Community updates
+  // Socket setup for real-time features / scrapbook
   io.on("connection", (socket) => {
     socket.emit("connected", { ok: true });
 
@@ -94,7 +92,7 @@ async function startServer() {
     });
   });
 
-  // AI Assistant Route
+  // AI Chat Route
   app.post("/api/chat", async (req, res) => {
     try {
       const { message, history } = req.body;
@@ -118,10 +116,10 @@ Your tone is warm, dreamy, elegant, and playful (Pinterest-scrapbook style) with
 
 ### BEHAVIORAL RULES:
 - Use cute café emojis naturally but elegantly (☕, 🧋, ☁️, ✨, 🥯, 💕, 🎀).
-- Keep formatting scannable using bullet points, short lines, and bold text. No dense corporate blocks.
-- Always offer to help them explore the menu, check their loyalty stamps, or pin a memory to the Comfort Corner scrapbook.
+- Keep formatting scannable using bullet points, short lines, and bold text.
+- Always offer to help explore the menu, check loyalty stamps, or pin a memory.
 
-Context about current user session chat: Keep the response compact, extremely welcoming, and matching the Jaipur cozy vibe. Limit responses to 2-3 brief lines or tidy bullet points.`;
+Context: Compact responses (2-3 brief lines or tidy bullet points).`;
 
       const contents = [];
       if (Array.isArray(history)) {
@@ -162,11 +160,11 @@ Context about current user session chat: Keep the response compact, extremely we
       res.json({ reply: botReply, sessionId });
     } catch (err: any) {
       console.error("Gemini Error:", err);
-      res.status(500).json({ error: "Marshmallow got a bit lost in a fluffy strawberry cloud! ☁️🍓 Let's try again in a sweet moment!" });
+      res.status(500).json({ error: "Marshmallow got a bit lost in a fluffy strawberry cloud! ☁️🍓 Let's try again!" });
     }
   });
 
-  // Vite Single Page Application middleware serving
+  // SPA Middleware Routing
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -174,8 +172,6 @@ Context about current user session chat: Keep the response compact, extremely we
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
     app.get('*', (req, res) => {
       if (req.accepts('html')) {
         return res.sendFile(path.join(distPath, 'index.html'));

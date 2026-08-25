@@ -1,0 +1,6 @@
+{
+  "name": "Plush Brew",
+  "description": "Jaipur's ultra-luxurious boba and bagel lounge featuring curated artisan bubble teas, toasted sourdough bagels, table reservations, live order simulation with GST breakdown, and a secure owner admin panel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

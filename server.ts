@@ -34,31 +34,49 @@ async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
   const httpServer = createServer(app);
+
+  // Configure Socket.IO with CORS for both development and deployed production domain
   const io = new SocketIOServer(httpServer, {
-    cors: { origin: process.env.CLIENT_ORIGIN || "http://localhost:3000" },
+    cors: { 
+      origin: process.env.CLIENT_ORIGIN || "*",
+      methods: ["GET", "POST"]
+    },
   });
 
   setSocketServer(io);
 
-  app.use(helmet({ contentSecurityPolicy: false }));
+  // Configure Security Headers with explicit Asset and Image policies
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginResourcePolicy: { policy: "cross-origin" },
+    })
+  );
+
   if (process.env.NODE_ENV !== "production") {
     app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 10000 }));
   } else {
     app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 300 }));
   }
-  app.use(express.json({ limit: "2mb" }));
-  app.use("/uploads", express.static(path.join(process.cwd(), "uploads"), {
+
+  app.use(express.json({ limit: "10mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+  // Serve static uploads folder (ensures images are visible in production)
+  const uploadsPath = path.join(process.cwd(), "uploads");
+  app.use("/uploads", express.static(uploadsPath, {
     maxAge: "7d",
     immutable: true,
   }));
 
+  // Ensure initial database schema setup runs safely on start
   try {
     await ensureUsersTable();
   } catch (error: any) {
     console.warn("Database initialization skipped; continuing in demo mode.", error?.message || error);
   }
 
-  // API routes
+  // Core API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
@@ -67,10 +85,16 @@ async function startServer() {
   app.use("/api", businessRoutes);
   app.use("/api/community", communityRoutes);
 
+  // Real-time WebSocket Listeners for Scrapbook & Community updates
   io.on("connection", (socket) => {
     socket.emit("connected", { ok: true });
+
+    socket.on("join-scrapbook", () => {
+      socket.join("scrapbook-room");
+    });
   });
 
+  // AI Assistant Route
   app.post("/api/chat", async (req, res) => {
     try {
       const { message, history } = req.body;
@@ -95,18 +119,11 @@ Your tone is warm, dreamy, elegant, and playful (Pinterest-scrapbook style) with
 ### BEHAVIORAL RULES:
 - Use cute café emojis naturally but elegantly (☕, 🧋, ☁️, ✨, 🥯, 💕, 🎀).
 - Keep formatting scannable using bullet points, short lines, and bold text. No dense corporate blocks.
-- When users ask about customization, remind them that hot drinks cannot have an ice option!
 - Always offer to help them explore the menu, check their loyalty stamps, or pin a memory to the Comfort Corner scrapbook.
-- Treat every customer like they are settling into the coziest corner of our lounge during a beautiful Jaipur golden hour.
 
-### SYSTEM SHORTCUTS / MICRO-INTERACTIONS:
-- If a user says "I want to add a dream", guide them to the Dream Clouds form.
-- If a user asks for a song recommendation, suggest a cozy track and remind them they can embed the YouTube link right onto our hanging strings.
-
-Context about current user session chat: This is a chat directly with Marshmallow on the browser overlay. Keep the response compact, extremely welcoming, and matching the Jaipur cozy vibe. Limit responses to 2-3 brief lines or tidy bullet points.`;
+Context about current user session chat: Keep the response compact, extremely welcoming, and matching the Jaipur cozy vibe. Limit responses to 2-3 brief lines or tidy bullet points.`;
 
       const contents = [];
-      
       if (Array.isArray(history)) {
         for (const msg of history) {
           contents.push({
@@ -115,11 +132,7 @@ Context about current user session chat: This is a chat directly with Marshmallo
           });
         }
       }
-      
-      contents.push({
-        role: "user",
-        parts: [{ text: message }]
-      });
+      contents.push({ role: "user", parts: [{ text: message }] });
 
       let botReply = `Ooh, welcome to Plush Brew! ☕✨ I’m in cozy demo mode right now, so I’m serving a warm local reply while the full AI setup is unavailable. Ask me about our menu, stamps, or dreamy café vibes.`;
 
@@ -127,10 +140,7 @@ Context about current user session chat: This is a chat directly with Marshmallo
         const response = await ai.models.generateContent({
           model: "gemini-2.0-flash",
           contents: contents,
-          config: {
-            systemInstruction: baseSystemPrompt,
-            temperature: 1.0,
-          }
+          config: { systemInstruction: baseSystemPrompt, temperature: 1.0 }
         });
         botReply = response.text;
       }
@@ -152,11 +162,11 @@ Context about current user session chat: This is a chat directly with Marshmallo
       res.json({ reply: botReply, sessionId });
     } catch (err: any) {
       console.error("Gemini Error:", err);
-      res.status(500).json({ error: "Marshmallow got a bit lost in a fluffy strawberry cloud! ☁️🍓 Let's try again in a sweet moment or sip on some Mango Iced Latte!" });
+      res.status(500).json({ error: "Marshmallow got a bit lost in a fluffy strawberry cloud! ☁️🍓 Let's try again in a sweet moment!" });
     }
   });
 
-  // Vite middleware setup
+  // Vite Single Page Application middleware serving
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
